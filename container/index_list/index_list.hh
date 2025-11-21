@@ -21,37 +21,33 @@
 template<class T>
 class IndexList {
 public:
-    using value_type = T;
-    using size_type  = std::size_t;
-    using index_type = size_type;
-
-    static constexpr index_type npos = static_cast<index_type>(-1);
+    static constexpr size_t npos = static_cast<size_t>(-1);
 
     // -----------------------------------------------------------------
     //  Node
     // -----------------------------------------------------------------
     struct Node {
-        T         value;
-        index_type prev;
-        index_type next;
+        T      value;
+        size_t prev;
+        size_t next;
 
-        Node(T v, index_type p, index_type n)
+        Node(T v, size_t p, size_t n)
             : value(std::move(v)), prev(p), next(n) {}
     };
 
 private:
     std::vector<Node> nodes_;
-    std::vector<index_type> free_list_;
-    index_type head_ = npos;
-    index_type tail_ = npos;
-    size_type  size_ = 0;
+    std::vector<size_t> free_list_;
+    size_t head_ = npos;
+    size_t tail_ = npos;
+    size_t size_ = 0;
 
     // -----------------------------------------------------------------
     //  Allocation
     // -----------------------------------------------------------------
-    index_type alloc_node(T v, index_type prev, index_type next)
+    size_t alloc_node(T v, size_t prev, size_t next)
     {
-        index_type idx;
+        size_t idx;
         if (!free_list_.empty()) {
             idx = free_list_.back();
             free_list_.pop_back();
@@ -63,12 +59,12 @@ private:
         return idx;
     }
 
-    void free_node(index_type idx)
+    void free_node(size_t idx)
     {
         free_list_.push_back(idx);
     }
 
-    void link(index_type prev, index_type next)
+    void link(size_t prev, size_t next)
     {
         if (prev != npos) nodes_[prev].next = next;
         if (next != npos) nodes_[next].prev = prev;
@@ -78,7 +74,7 @@ public:
     // -----------------------------------------------------------------
     //  Construction
     // -----------------------------------------------------------------
-    explicit IndexList(size_type capacity = 64)
+    explicit IndexList(size_t capacity = 64)
     {
         nodes_.reserve(capacity);
         free_list_.reserve(capacity);
@@ -89,7 +85,7 @@ public:
     // -----------------------------------------------------------------
     void push_back(T v)
     {
-        index_type idx = alloc_node(std::move(v), tail_, npos);
+        size_t idx = alloc_node(std::move(v), tail_, npos);
         if (empty()) {
             head_ = tail_ = idx;
         } else {
@@ -101,7 +97,7 @@ public:
 
     void push_front(T v)
     {
-        index_type idx = alloc_node(std::move(v), npos, head_);
+        size_t idx = alloc_node(std::move(v), npos, head_);
         if (empty()) {
             head_ = tail_ = idx;
         } else {
@@ -114,7 +110,7 @@ public:
     template<class... Args>
     T& emplace_back(Args&&... args)
     {
-        index_type idx = alloc_node(T(std::forward<Args>(args)...), tail_, npos);
+        size_t idx = alloc_node(T(std::forward<Args>(args)...), tail_, npos);
         if (empty()) {
             head_ = tail_ = idx;
         } else {
@@ -128,7 +124,7 @@ public:
     template<class... Args>
     T& emplace_front(Args&&... args)
     {
-        index_type idx = alloc_node(T(std::forward<Args>(args)...), npos, head_);
+        size_t idx = alloc_node(T(std::forward<Args>(args)...), npos, head_);
         if (empty()) {
             head_ = tail_ = idx;
         } else {
@@ -145,7 +141,7 @@ public:
     void pop_back()
     {
         assert(!empty() && "pop_back on empty list");
-        index_type old = tail_;
+        size_t old = tail_;
         tail_ = nodes_[old].prev;
         if (tail_ != npos) nodes_[tail_].next = npos;
         else head_ = npos;
@@ -156,7 +152,7 @@ public:
     void pop_front()
     {
         assert(!empty() && "pop_front on empty list");
-        index_type old = head_;
+        size_t old = head_;
         head_ = nodes_[old].next;
         if (head_ != npos) nodes_[head_].prev = npos;
         else tail_ = npos;
@@ -194,7 +190,7 @@ public:
     // -----------------------------------------------------------------
     //  Erase / Remove
     // -----------------------------------------------------------------
-    void erase(index_type idx)
+    void erase(size_t idx)
     {
         assert(idx < nodes_.size() && "invalid index");
         auto& node = nodes_[idx];
@@ -208,9 +204,9 @@ public:
     template<class Predicate>
     void remove_if(Predicate pred)
     {
-        index_type curr = head_;
+        size_t curr = head_;
         while (curr != npos) {
-            index_type next = nodes_[curr].next;
+            size_t next = nodes_[curr].next;
             if (pred(nodes_[curr].value)) {
                 erase(curr);
             }
@@ -222,28 +218,28 @@ public:
     //  Queries
     // -----------------------------------------------------------------
     [[nodiscard]] bool empty() const noexcept { return size_ == 0; }
-    [[nodiscard]] size_type size() const noexcept { return size_; }
+    [[nodiscard]] size_t size() const noexcept { return size_; }
 
-    [[nodiscard]] index_type front_index() const noexcept { return head_; }
-    [[nodiscard]] index_type back_index() const noexcept { return tail_; }
+    [[nodiscard]] size_t front_index() const noexcept { return head_; }
+    [[nodiscard]] size_t back_index() const noexcept { return tail_; }
 
-    [[nodiscard]] std::optional<index_type> next_index(index_type idx) const
+    [[nodiscard]] std::optional<size_t> next_index(size_t idx) const
     {
         if (idx == npos || idx >= nodes_.size()) return std::nullopt;
-        index_type n = nodes_[idx].next;
+        size_t n = nodes_[idx].next;
         return n == npos ? std::nullopt : std::make_optional(n);
     }
 
     // -----------------------------------------------------------------
     //  Access by index
     // -----------------------------------------------------------------
-    T& operator[](index_type idx)
+    T& operator[](size_t idx)
     {
         assert(idx < nodes_.size());
         return nodes_[idx].value;
     }
 
-    const T& operator[](index_type idx) const
+    const T& operator[](size_t idx) const
     {
         assert(idx < nodes_.size());
         return nodes_[idx].value;
