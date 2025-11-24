@@ -86,64 +86,70 @@ std::bitset<N> make_bitset(const std::bitset<M>& src)
     return dst;
 }
 
-
-template <size_t N>
+template <size_t N, size_t W>
 class BitSlice {
 public:
-    BitSlice(std::bitset<N>& data, size_t hi, size_t lo)
-        : data(data), lo(lo), width(hi - lo + 1) {}
+    static_assert(W > 0, "BitSlice width must be > 0");
+    static_assert(W <= N, "BitSlice width cannot exceed parent bitset size");
 
-    size_t size() const { return width; }
+    BitSlice(std::bitset<N>& data, size_t lo)
+        : data(data), lo(lo)
+    {}
 
-    // read
+    size_t size() const { return W; }
+
+    // --- Read ---
     bool operator[](size_t idx) const {
         return data[lo + idx];
     }
 
-    // write
+    // --- Write ---
     typename std::bitset<N>::reference operator[](size_t idx) {
         return data[lo + idx];
     }
+
     void set(size_t idx, bool value) {
         data[lo + idx] = value;
     }
 
-    // assignment from another BitVec-like type
+    // --- Assignment from any BitVec-like type ---
     template <typename OtherT>
     BitSlice& operator=(const OtherT& rhs) {
-        std::bitset<N> bits = make_bitset<N>(rhs) << lo;
-        std::bitset<N> mask = make_bitmask<N>(width) << lo;
-        data = (data & ~mask) | (bits & mask);
+        // Convert rhs → std::bitset<N>
+        std::bitset<N> rhs_bits = make_bitset<N>(rhs) << lo;
+
+        // Prepare mask at the correct offset
+        std::bitset<N> mask = make_bitmask<N>(W) << lo;
+
+        data = (data & ~mask) | (rhs_bits & mask);
         return *this;
     }
 
-    // Explicit copy assignment — forwards to templated version
+    // Copy assignment from same-width slice
     BitSlice& operator=(const BitSlice& rhs) {
         return this->operator=<BitSlice>(rhs);
     }
 
-    // explicit conversion to a fixed BitVec<M>
+    // --- Conversion to std::bitset<M> ---
     template <size_t M>
     explicit operator std::bitset<M>() const {
         std::bitset<M> result = make_bitset<M>(data >> lo);
-        result &= make_bitmask<M>(width);
+        result &= make_bitmask<M>(W);
         return result;
     }
 
-    operator std::bitset<N>() const {
-        std::bitset<N> result = data >> lo;
-        result &= make_bitmask<N>(width);
+    operator std::bitset<W>() const {
+        std::bitset<W> result = make_bitset<W>(data >> lo);
         return result;
     }
 
 private:
     std::bitset<N>& data;
     size_t lo;
-    size_t width;
 };
 
-template <size_t N, size_t M>
-std::bitset<N> make_bitset(const BitSlice<M>& slice)
+template <size_t N, size_t M, size_t W>
+std::bitset<N> make_bitset(const BitSlice<M, W>& slice)
 {
     return (std::bitset<N>)slice;
 }
@@ -160,32 +166,32 @@ std::bitset<N> make_bitset(const BitSlice<M>& slice)
  * Current cost: **zero** compared to raw std::bitset<N>
  */
 template <std::size_t N>
-class BitVec {
+class bits {
 public:
     using size_type = std::size_t;
 
     // -----------------------------------------------------------------
     //  Constructors / Assignment
     // -----------------------------------------------------------------
-    BitVec() = default;
-    BitVec(const std::bitset<N>& bs) : data(bs) {}
-    BitVec(std::bitset<N>&& bs) noexcept : data(std::move(bs)) {}
+    bits() = default;
+    bits(const std::bitset<N>& bs) : data(bs) {}
+    bits(std::bitset<N>&& bs) noexcept : data(std::move(bs)) {}
 
-    BitVec& operator=(const std::bitset<N>& bs) { data = bs; return *this; }
-    BitVec& operator=(std::bitset<N>&& bs) noexcept { data = std::move(bs); return *this; }
+    bits& operator=(const std::bitset<N>& bs) { data = bs; return *this; }
+    bits& operator=(std::bitset<N>&& bs) noexcept { data = std::move(bs); return *this; }
 
     // Defaulted special members
-    BitVec(const BitVec&) = default;
-    BitVec(BitVec&&) noexcept = default;
-    BitVec& operator=(const BitVec&) = default;
-    BitVec& operator=(BitVec&&) noexcept = default;
+    bits(const bits&) = default;
+    bits(bits&&) noexcept = default;
+    bits& operator=(const bits&) = default;
+    bits& operator=(bits&&) noexcept = default;
 
     // Compare BitVec<N> with BitVec<N>
-    bool operator==(const BitVec<N>& other) const noexcept {
+    bool operator==(const bits<N>& other) const noexcept {
         return data == other.data;
     }
 
-    bool operator!=(const BitVec<N>& other) const noexcept {
+    bool operator!=(const bits<N>& other) const noexcept {
         return data != other.data;
     }
 
@@ -204,28 +210,71 @@ public:
     operator const std::bitset<N>&() const noexcept { return data; }
     operator std::bitset<N>&() noexcept { return data; }
 
+    std::string to_string() const {
+        return data.to_string();
+    }
+
     // -----------------------------------------------------------------
     //  Optional: expose common bitset methods directly (for discoverability)
     // -----------------------------------------------------------------
     bool test(size_type pos) const { return data.test(pos); }
-    BitVec& set(size_type pos, bool val = true) { data.set(pos, val); return *this; }
-    BitVec& reset(size_type pos) { data.reset(pos); return *this; }
-    BitVec& flip(size_type pos) { data.flip(pos); return *this; }
+    bits& set(size_type pos, bool val = true) { data.set(pos, val); return *this; }
+    bits& reset(size_type pos) { data.reset(pos); return *this; }
+    bits& flip(size_type pos) { data.flip(pos); return *this; }
 
     bool any() const noexcept { return data.any(); }
     bool all() const noexcept { return data.all(); }
     bool none() const noexcept { return data.none(); }
     size_type count() const noexcept { return data.count(); }
 
-    // --- Slice API ---
-    BitSlice<N> operator()(size_t hi, size_t lo) {
-        return BitSlice<N>(data, hi, lo);
+    // ------------------------------
+    // Slice: full version <HI, LO>
+    // ------------------------------
+    template <size_t HI, size_t LO>
+    auto slice() {
+        constexpr size_t W = HI - LO + 1;
+        static_assert(HI < N && LO < N && HI >= LO);
+        return BitSlice<N, W>(data, LO);
     }
 
-    const BitSlice<N> operator()(size_t hi, size_t lo) const {
-        return BitSlice<N>(data, hi, lo);
+    template <size_t HI, size_t LO>
+    auto slice() const {
+        constexpr size_t W = HI - LO + 1;
+        static_assert(HI < N && LO < N && HI >= LO);
+        return BitSlice<N, W>(data, LO);
+    }
+
+    // --------------------------------
+    // slice_lo<LO, W>
+    // --------------------------------
+    template <size_t W>
+    auto slice_lo(size_t lo) {
+        return BitSlice<N, W>(data, lo);
+    }
+
+    template <size_t W>
+    auto slice_lo(size_t lo) const {
+        return BitSlice<N, W>(data, lo);
+    }
+
+    // --------------------------------
+    // slice_hi<HI, W>
+    // --------------------------------
+    template <size_t W>
+    auto slice_hi(size_t hi) {
+        return BitSlice<N, W>(data, hi + 1 - W);
+    }
+
+    template <size_t W>
+    auto slice_hi(size_t hi) const {
+        return BitSlice<N, W>(data, hi + 1 - W);
     }
 
 private:
     std::bitset<N> data{};
 };
+
+template <size_t N>
+std::ostream& operator<<(std::ostream& os, const bits<N>& bv) {
+    return os << static_cast<const std::bitset<N>&>(bv);
+}

@@ -1,7 +1,7 @@
 // container/bitvec/test.cc
 // Comprehensive correctness test for BitVec<N> (bitset-backed)
 
-#include "bit_vector.hh"
+#include "bits.hh"
 #include <array>
 #include <bitset>
 #include <random>
@@ -13,10 +13,11 @@
 // ====================================================================
 //  7-Scenario Test (templated on RNG)
 // ====================================================================
-template<std::size_t N, class RNG>
+template<std::size_t N, std::size_t W, class RNG>
 void comprehensive_test_once(RNG& rng)
 {
-    std::uniform_int_distribution<std::size_t> pos(0, N-1);
+    std::uniform_int_distribution<std::size_t> gPos(W-1, N-1);
+    std::uniform_int_distribution<std::size_t> lPos(0, W-1);
     std::uniform_int_distribution<int> bit(0, 1);
 
     // 1. Randomize golden bitset
@@ -24,62 +25,69 @@ void comprehensive_test_once(RNG& rng)
     for (std::size_t i = 0; i < N; ++i) golden[i] = bit(rng);
 
     // 2. Create BitVec from golden
-    BitVec<N> bv(golden);
+    bits<N> bv(golden);
 
     // Basic sanity
     assert((std::bitset<N>(bv) == golden) && "initial copy failed");
 
     // 3. Random valid range [lo, hi] (lo <= hi)
-    std::size_t lo = pos(rng);
-    std::size_t hi = pos(rng);
-    if (lo > hi) std::swap(lo, hi);
-    const std::size_t width = hi - lo + 1;
+    std::size_t hi = gPos(rng);
+    std::size_t lo = hi + 1 - W;
 
     // 4. Range read → compare with naive extraction
     std::bitset<N> extracted_naive;
-    for (std::size_t i = 0; i < width; ++i) extracted_naive[i] = golden[lo + i];
+    for (std::size_t i = 0; i < W; ++i) extracted_naive[i] = golden[lo + i];
 
-    std::bitset<N> extracted_bv = bv(hi, lo);
+    std::bitset<N> extracted_bv = make_bitset<N>(bv.template slice_hi<W>(hi));
     assert(extracted_bv == extracted_naive && "range read failed");
 
     // 5. Single-bit access within range
-    if (width > 0) {
-        std::size_t local = pos(rng) % width;
+    {
+        std::size_t local = lPos(rng);
         std::size_t global = lo + local;
-        bool bv_bit = bv(hi, lo)[local];
-        bool golden_bit = golden[global];
-        assert(bv_bit == golden_bit && "single-bit access failed");
+        assert(bv.template slice_hi<W>(hi)[local] == golden[global] &&
+            "single-bit access of slice_hi failed");
+        assert(bv.template slice_lo<W>(lo)[local] == golden[global] &&
+            "single-bit access of slice_lo failed");
     }
 
-    // 6. Toggle a random bit in range
-    if (width > 0) {
-        std::size_t local = pos(rng) % width;
+    {
+        // 6. Toggle a random bit in range
+        std::size_t local = lPos(rng);
         std::size_t global = lo + local;
-        bv(hi, lo)[local].flip();
+        bv.template slice_hi<W>(hi)[local].flip();
         golden.flip(global);
-        assert(bv(hi, lo)[local] == golden[global] && "bit toggle failed");
+        assert(bv == golden && "bit toggle failed");
     }
+
 
     // 7. Assignment tests
     // 7a: assign from uint64_t (only if width <= 64)
-    if (width <= 64) {
+    {
         uint64_t val = rng();
-        uint64_t mask = width == 64 ? ~uint64_t(0) : (uint64_t(1) << width) - 1;
+        uint64_t mask = W < 64 ? (uint64_t(1) << W) - 1 : ~uint64_t(0);
         val &= mask;
 
-        bv(hi, lo) = val;
+        bv.template slice_hi<W>(hi) = val;
 
-        for (std::size_t i = 0; i < width; ++i) {
-            golden[lo + i] = (val >> i) & 1;
+        for (std::size_t i = 0; i < W; ++i) {
+            golden[lo + i] = i < 64 ? (val >> i) & 1 : 0;
         }
 
-        assert((std::bitset<N>(bv) == golden) && "uint64_t assignment failed");
+        if (std::bitset<N>(bv) != golden) {
+            std::cerr << "Test failed: uint64_t assignment\n";
+            std::cerr << "hi=" << hi << " lo=" << lo << " W=" << W << "\n";
+            std::cerr << "val      = 0x" << std::hex << val << std::dec << "\n";
+            std::cerr << "bv       = " << bv << "\n";
+            std::cerr << "expected = " << golden << "\n";
+            assert(false && "uint64_t assignment failed");
+        }
     }
 
     // 7b: assign from another slice
-    if (width > 0) {
-        std::size_t lo2 = pos(rng);
-        std::size_t hi2 = lo2 + width - 1;
+    {
+        std::size_t hi2 = gPos(rng);
+        std::size_t lo2 = hi2 + 1 - W;
         if (hi2 >= N) hi2 = N - 1;
         std::size_t src_width = hi2 - lo2 + 1;
 
@@ -88,10 +96,10 @@ void comprehensive_test_once(RNG& rng)
         std::bitset<N> old_golden = golden;
 
         // Perform assignment
-        bv(hi, lo) = bv(hi2, lo2);
+        bv.template slice_hi<W>(hi) = bv.template slice_lo<W>(lo2);
 
         // Apply same to golden model (with proper width)
-        for (std::size_t i = 0; i < hi - lo + 1; ++i) {
+        for (std::size_t i = 0; i < W; ++i) {
             golden[lo + i] = i < src_width ? old_golden[lo2 + i] : 0;
         }
 
@@ -99,7 +107,7 @@ void comprehensive_test_once(RNG& rng)
 
         if (new_bv != golden) {
             std::cerr << "\n=== SLICE ASSIGNMENT FAILED ===\n"
-                    << "Range: (" << hi << "," << lo << ")  width=" << width << "\n"
+                    << "Range: (" << hi << "," << lo << ")  width=" << W << "\n"
                     << "Source range: (" << hi2 << "," << lo2 << ")  src_width=" << src_width << "\n"
                     << "Old BitVec : " << old_bv << "\n"
                     << "Old Golden : " << old_golden << "\n"
@@ -123,10 +131,16 @@ void stress_test_bitvec(std::mt19937::result_type seed = 42)
               << Iterations << " iterations | seed = " << seed << " ===\n";
 
     for (std::size_t i = 0; i < Iterations; ++i) {
-        comprehensive_test_once<N>(rng);
-        if ((i + 1) % (Iterations / 4) == 0) {
-            std::cout << "  " << (i + 1) << " / " << Iterations << " passed\n";
-        }
+        comprehensive_test_once<N, 1>(rng);
+        comprehensive_test_once<N, 3>(rng);
+        comprehensive_test_once<N, 7>(rng);
+        comprehensive_test_once<N, 43>(rng);
+
+        if constexpr (N > 64)  comprehensive_test_once<N, 65>(rng);
+        if constexpr (N > 128) comprehensive_test_once<N, 129>(rng);
+        // if ((i + 1) % (Iterations / 4) == 0) {
+        //     std::cout << "  " << (i + 1) << " / " << Iterations << " passed\n";
+        // }
     }
 
     std::cout << "All " << Iterations << " iterations passed for N=" << N << "\n\n";
